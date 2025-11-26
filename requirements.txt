@@ -1,0 +1,5 @@
+flask
+signxml
+lxml
+cryptography
+gunicorn
