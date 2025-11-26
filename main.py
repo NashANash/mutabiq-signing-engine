@@ -1,9 +1,11 @@
 from flask import Flask, request, jsonify
 from signer import sign_xml
+from invoice_builder import build_invoice_xml
 
 app = Flask(__name__)
 
 
+# توقيع XML مباشر
 @app.route("/sign", methods=["POST"])
 def sign():
     try:
@@ -20,6 +22,27 @@ def sign():
         }), 400
 
 
+
+# تحويل JSON → XML → توقيع
+@app.route("/sign_invoice", methods=["POST"])
+def sign_invoice():
+    try:
+        data = request.json
+
+        xml_str = build_invoice_xml(data)   # تحويل JSON → XML
+        signed_xml = sign_xml(xml_str)      # توقيع XML
+
+        return jsonify({
+            "status": "success",
+            "signed_xml": signed_xml
+        })
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 400
+
+
+
+# هوم بيج
 @app.route("/")
 def home():
     return "Mutabiq Signing Engine is running."
