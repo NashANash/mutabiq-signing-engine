@@ -11,7 +11,7 @@ def _to_float(value, default=0.0):
         return default
 
 def build_invoice_xml(data):
-    # نقرأ القيم اللي جاية من الـ JSON
+    # نحول القيم الرقمية
     subtotal_in = _to_float(data.get("Subtotal"))
     total_in = _to_float(data.get("Total"))
     vat_in = _to_float(data.get("VAT"))
@@ -20,46 +20,40 @@ def build_invoice_xml(data):
     vat = vat_in
     total = total_in
 
-    # ✅ 1) لو عندنا Subtotal بس
+    # حالة: إذا عندك Subtotal فقط
     if subtotal and not total:
         vat = round(subtotal * VAT_RATE, 2)
         total = round(subtotal + vat, 2)
 
-    # ✅ 2) لو عندنا Total بس
+    # حالة: Total فقط
     elif total and not subtotal:
         subtotal = round(total / (1 + VAT_RATE), 2)
         vat = round(total - subtotal, 2)
 
-    # ✅ 3) لو عندنا الاثنين Subtotal + Total
+    # حالة: Subtotal + Total
     elif subtotal and total:
-        # نعيد الحساب من Subtotal ونطنش أي تناقض
         vat = round(subtotal * VAT_RATE, 2)
         total = round(subtotal + vat, 2)
 
-    # ✅ 4) لو ما فيه ولا رقم مفهوم
+    # ولا شيء
     else:
         subtotal = 0.0
         vat = 0.0
         total = 0.0
 
-    # نبدأ نبني XML
     root = ET.Element("Invoice")
 
-    # بيانات أساسية
     ET.SubElement(root, "InvoiceNumber").text = str(data.get("InvoiceNumber", ""))
     ET.SubElement(root, "IssueDate").text = str(data.get("IssueDate", ""))
 
-    # البائع
     seller = ET.SubElement(root, "Seller")
     ET.SubElement(seller, "Name").text = str(data.get("SellerName", ""))
     ET.SubElement(seller, "VATNumber").text = str(data.get("SellerVAT", ""))
 
-    # المشتري
     buyer = ET.SubElement(root, "Buyer")
     ET.SubElement(buyer, "Name").text = str(data.get("BuyerName", ""))
     ET.SubElement(buyer, "VATNumber").text = str(data.get("BuyerVAT", ""))
 
-    # المجاميع
     totals = ET.SubElement(root, "Totals")
     ET.SubElement(totals, "Subtotal").text = f"{subtotal:.2f}"
     ET.SubElement(totals, "VAT").text = f"{vat:.2f}"
