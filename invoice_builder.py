@@ -8,4 +8,3 @@ def build_invoice_xml(data):
         child.text = str(value)
 
     return ET.tostring(root, encoding="utf-8").decode(
-    
