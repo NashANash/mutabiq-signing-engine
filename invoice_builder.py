@@ -7,4 +7,4 @@ def build_invoice_xml(data):
         child = ET.SubElement(root, key)
         child.text = str(value)
 
-    return ET.tostring(root, encoding="utf-8").decode(
+    return ET.tostring(root, encoding="utf-8").decode()
