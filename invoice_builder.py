@@ -1,10 +1,68 @@
 import xml.etree.ElementTree as ET
 
+VAT_RATE = 0.15
+
+def _to_float(value, default=0.0):
+    try:
+        if value is None:
+            return default
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
 def build_invoice_xml(data):
+    # نقرأ القيم اللي جاية من الـ JSON
+    subtotal_in = _to_float(data.get("Subtotal"))
+    total_in = _to_float(data.get("Total"))
+    vat_in = _to_float(data.get("VAT"))
+
+    subtotal = subtotal_in
+    vat = vat_in
+    total = total_in
+
+    # ✅ 1) لو عندنا Subtotal بس
+    if subtotal and not total:
+        vat = round(subtotal * VAT_RATE, 2)
+        total = round(subtotal + vat, 2)
+
+    # ✅ 2) لو عندنا Total بس
+    elif total and not subtotal:
+        subtotal = round(total / (1 + VAT_RATE), 2)
+        vat = round(total - subtotal, 2)
+
+    # ✅ 3) لو عندنا الاثنين Subtotal + Total
+    elif subtotal and total:
+        # نعيد الحساب من Subtotal ونطنش أي تناقض
+        vat = round(subtotal * VAT_RATE, 2)
+        total = round(subtotal + vat, 2)
+
+    # ✅ 4) لو ما فيه ولا رقم مفهوم
+    else:
+        subtotal = 0.0
+        vat = 0.0
+        total = 0.0
+
+    # نبدأ نبني XML
     root = ET.Element("Invoice")
 
-    for key, value in data.items():
-        child = ET.SubElement(root, key)
-        child.text = str(value)
+    # بيانات أساسية
+    ET.SubElement(root, "InvoiceNumber").text = str(data.get("InvoiceNumber", ""))
+    ET.SubElement(root, "IssueDate").text = str(data.get("IssueDate", ""))
+
+    # البائع
+    seller = ET.SubElement(root, "Seller")
+    ET.SubElement(seller, "Name").text = str(data.get("SellerName", ""))
+    ET.SubElement(seller, "VATNumber").text = str(data.get("SellerVAT", ""))
+
+    # المشتري
+    buyer = ET.SubElement(root, "Buyer")
+    ET.SubElement(buyer, "Name").text = str(data.get("BuyerName", ""))
+    ET.SubElement(buyer, "VATNumber").text = str(data.get("BuyerVAT", ""))
+
+    # المجاميع
+    totals = ET.SubElement(root, "Totals")
+    ET.SubElement(totals, "Subtotal").text = f"{subtotal:.2f}"
+    ET.SubElement(totals, "VAT").text = f"{vat:.2f}"
+    ET.SubElement(totals, "Total").text = f"{total:.2f}"
 
     return ET.tostring(root, encoding="utf-8").decode()
