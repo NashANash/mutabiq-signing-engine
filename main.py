@@ -4,52 +4,68 @@ from invoice_builder import build_invoice_xml
 
 app = Flask(__name__)
 
+@app.route("/", methods=["GET"])
+def health():
+    return jsonify({
+        "status": "ok",
+        "service": "mutabiq-signing-engine"
+    })
 
-# توقيع XML مباشر
 @app.route("/sign", methods=["POST"])
-def sign():
+def sign_only():
+    """
+    يوقّع أي XML خام يجي في الـ body
+    """
     try:
         xml_input = request.data.decode("utf-8")
-        signed_xml = sign_xml(xml_input)
+        if not xml_input.strip():
+            return jsonify({
+                "status": "error",
+                "message": "Empty XML body"
+            }), 400
+
+        signed = sign_xml(xml_input)
         return jsonify({
             "status": "success",
-            "signed_xml": signed_xml
+            "signed_xml": signed
         })
     except Exception as e:
         return jsonify({
             "status": "error",
             "message": str(e)
-        }), 400
+        }), 500
 
-
-
-# تحويل JSON → XML → توقيع
 @app.route("/sign_invoice", methods=["POST"])
 def sign_invoice():
+    """
+    يأخذ JSON لفاتورة، يبني UBL XML، ثم يوقّعه
+    """
     try:
-        data = request.json
+        data = request.get_json(force=True, silent=False)
+        if not isinstance(data, dict):
+            return jsonify({
+                "status": "error",
+                "message": "Body must be a JSON object"
+            }), 400
 
-        xml_str = build_invoice_xml(data)   # تحويل JSON → XML
-        signed_xml = sign_xml(xml_str)      # توقيع XML
+        # بناء UBL XML
+        invoice_xml = build_invoice_xml(data)
+
+        # توقيع الفاتورة
+        signed = sign_xml(invoice_xml)
 
         return jsonify({
             "status": "success",
-            "signed_xml": signed_xml
+            "invoice_xml": invoice_xml,
+            "signed_xml": signed
         })
-
     except Exception as e:
-        return jsonify({"error": str(e)}), 400
-
-
-
-# هوم بيج
-@app.route("/")
-def home():
-    return "Mutabiq Signing Engine is running."
-
+        return jsonify({
+            "status": "error",
+            "message": str(e)
+        }), 500
 
 if __name__ == "__main__":
     import os
     port = int(os.environ.get("PORT", 8080))
     app.run(host="0.0.0.0", port=port)
-    # update
