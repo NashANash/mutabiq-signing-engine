@@ -2,7 +2,7 @@ import xml.etree.ElementTree as ET
 
 VAT_RATE = 0.15
 
-# نحاول نحول أي قيمة لرقم
+# يحول أي قيمة رقمية بشكل آمن
 def _to_float(value, default=0.0):
     try:
         if value is None:
@@ -13,23 +13,10 @@ def _to_float(value, default=0.0):
 
 def build_invoice_xml(data):
     """
-    تبني فاتورة UBL 2.1 مبسّطة من JSON
-    المدخل المتوقع (أمثلة مفيدة):
-    {
-      "InvoiceNumber": "INV-1001",
-      "IssueDate": "2025-11-27",
-      "SellerName": "Mutabiq",
-      "SellerVAT": "300000000000003",
-      "BuyerName": "Test Client",
-      "BuyerVAT": "300000000000004",
-      "Currency": "SAR",
-      "Subtotal": "100",   (اختياري)
-      "Total": "115",      (اختياري)
-      "VAT": "15"          (اختياري)
-    }
+    يبني فاتورة UBL 2.1 من JSON
     """
 
-    # نقرأ القيم الرقمية
+    # قراءة القيم الرقمية وإصلاحها
     subtotal_in = _to_float(data.get("Subtotal"))
     total_in = _to_float(data.get("Total"))
     vat_in = _to_float(data.get("VAT"))
@@ -38,22 +25,21 @@ def build_invoice_xml(data):
     vat = vat_in
     total = total_in
 
-    # 1) لو عندك Subtotal فقط
+    # 1) لو فقط Subtotal
     if subtotal and not total:
         vat = round(subtotal * VAT_RATE, 2)
         total = round(subtotal + vat, 2)
 
-    # 2) لو عندك Total فقط
+    # 2) لو فقط Total
     elif total and not subtotal:
         subtotal = round(total / (1 + VAT_RATE), 2)
         vat = round(total - subtotal, 2)
 
-    # 3) لو عندك الاثنين Subtotal + Total
+    # 3) لو موجودين مع بعض
     elif subtotal and total:
         vat = round(subtotal * VAT_RATE, 2)
         total = round(subtotal + vat, 2)
 
-    # 4) لو ما فيه شيء مفهوم
     else:
         subtotal = 0.0
         vat = 0.0
@@ -61,7 +47,7 @@ def build_invoice_xml(data):
 
     currency = data.get("Currency", "SAR") or "SAR"
 
-    # namespaces حق UBL
+    # تعريف namespaces الخاصة بـ UBL
     NSMAP = {
         "": "urn:oasis:names:specification:ubl:schema:xsd:Invoice-2",
         "cac": "urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2",
@@ -69,10 +55,7 @@ def build_invoice_xml(data):
     }
 
     for prefix, uri in NSMAP.items():
-        if prefix == "":
-            ET.register_namespace("", uri)
-        else:
-            ET.register_namespace(prefix, uri)
+        ET.register_namespace(prefix if prefix != "" else "", uri)
 
     def qname(prefix, tag):
         if prefix == "":
@@ -82,68 +65,62 @@ def build_invoice_xml(data):
     # الجذر: Invoice
     root = ET.Element(qname("", "Invoice"))
 
-    # ID + IssueDate
+    # رقم الفاتورة + تاريخ الإصدار
     cbc_id = ET.SubElement(root, qname("cbc", "ID"))
     cbc_id.text = str(data.get("InvoiceNumber", ""))
 
     cbc_issue_date = ET.SubElement(root, qname("cbc", "IssueDate"))
     cbc_issue_date.text = str(data.get("IssueDate", ""))
 
-    # Currency
-    cbc_doc_currency = ET.SubElement(root, qname("cbc", "DocumentCurrencyCode"))
-    cbc_doc_currency.text = currency
+    # العملة
+    cbc_currency = ET.SubElement(root, qname("cbc", "DocumentCurrencyCode"))
+    cbc_currency.text = currency
 
-    # البائع: AccountingSupplierParty
+    # بيانات البائع
     cac_supplier = ET.SubElement(root, qname("cac", "AccountingSupplierParty"))
-    cac_supplier_party = ET.SubElement(cac_supplier, qname("cac", "Party"))
+    supplier_party = ET.SubElement(cac_supplier, qname("cac", "Party"))
 
-    seller_name = ET.SubElement(cac_supplier_party, qname("cbc", "Name"))
+    seller_name = ET.SubElement(supplier_party, qname("cbc", "Name"))
     seller_name.text = str(data.get("SellerName", ""))
 
-    seller_tax_scheme = ET.SubElement(
-        cac_supplier_party,
-        qname("cac", "PartyTaxScheme")
-    )
-    seller_vat_number = ET.SubElement(seller_tax_scheme, qname("cbc", "CompanyID"))
-    seller_vat_number.text = str(data.get("SellerVAT", ""))
+    supplier_tax = ET.SubElement(supplier_party, qname("cac", "PartyTaxScheme"))
+    seller_vat = ET.SubElement(supplier_tax, qname("cbc", "CompanyID"))
+    seller_vat.text = str(data.get("SellerVAT", ""))
 
-    # المشتري: AccountingCustomerParty
+    # بيانات المشتري
     cac_customer = ET.SubElement(root, qname("cac", "AccountingCustomerParty"))
-    cac_customer_party = ET.SubElement(cac_customer, qname("cac", "Party"))
+    customer_party = ET.SubElement(cac_customer, qname("cac", "Party"))
 
-    buyer_name = ET.SubElement(cac_customer_party, qname("cbc", "Name"))
+    buyer_name = ET.SubElement(customer_party, qname("cbc", "Name"))
     buyer_name.text = str(data.get("BuyerName", ""))
 
-    buyer_tax_scheme = ET.SubElement(
-        cac_customer_party,
-        qname("cac", "PartyTaxScheme")
-    )
-    buyer_vat_number = ET.SubElement(buyer_tax_scheme, qname("cbc", "CompanyID"))
-    buyer_vat_number.text = str(data.get("BuyerVAT", ""))
+    buyer_tax = ET.SubElement(customer_party, qname("cac", "PartyTaxScheme"))
+    buyer_vat = ET.SubElement(buyer_tax, qname("cbc", "CompanyID"))
+    buyer_vat.text = str(data.get("BuyerVAT", ""))
 
-    # TaxTotal (إجمالي الضريبة)
+    # الضريبة الإجمالية
     cac_tax_total = ET.SubElement(root, qname("cac", "TaxTotal"))
     tax_amount = ET.SubElement(cac_tax_total, qname("cbc", "TaxAmount"))
     tax_amount.set("currencyID", currency)
     tax_amount.text = f"{vat:.2f}"
 
-    # LegalMonetaryTotal (المجاميع النهائية)
-    cac_legal_total = ET.SubElement(root, qname("cac", "LegalMonetaryTotal"))
+    # المجموع النهائي
+    cac_legal = ET.SubElement(root, qname("cac", "LegalMonetaryTotal"))
 
-    line_extension = ET.SubElement(cac_legal_total, qname("cbc", "LineExtensionAmount"))
-    line_extension.set("currencyID", currency)
-    line_extension.text = f"{subtotal:.2f}"
+    line_ext = ET.SubElement(cac_legal, qname("cbc", "LineExtensionAmount"))
+    line_ext.set("currencyID", currency)
+    line_ext.text = f"{subtotal:.2f}"
 
-    tax_exclusive = ET.SubElement(cac_legal_total, qname("cbc", "TaxExclusiveAmount"))
-    tax_exclusive.set("currencyID", currency)
-    tax_exclusive.text = f"{subtotal:.2f}"
+    tax_excl = ET.SubElement(cac_legal, qname("cbc", "TaxExclusiveAmount"))
+    tax_excl.set("currencyID", currency)
+    tax_excl.text = f"{subtotal:.2f}"
 
-    tax_inclusive = ET.SubElement(cac_legal_total, qname("cbc", "TaxInclusiveAmount"))
-    tax_inclusive.set("currencyID", currency)
-    tax_inclusive.text = f"{total:.2f}"
+    tax_incl = ET.SubElement(cac_legal, qname("cbc", "TaxInclusiveAmount"))
+    tax_incl.set("currencyID", currency)
+    tax_incl.text = f"{total:.2f}"
 
-    payable_amount = ET.SubElement(cac_legal_total, qname("cbc", "PayableAmount"))
-    payable_amount.set("currencyID", currency)
-    payable_amount.text = f"{total:.2f}"
+    payable = ET.SubElement(cac_legal, qname("cbc", "PayableAmount"))
+    payable.set("currencyID", currency)
+    payable.text = f"{total:.2f}"
 
     return ET.tostring(root, encoding="utf-8").decode()
