@@ -13,10 +13,10 @@ def _to_float(value, default=0.0):
 
 def build_invoice_xml(data):
     """
-    يبني فاتورة UBL 2.1 من JSON
+    يبني فاتورة UBL 2.1 من JSON — الإصدار الأساسي (B)
     """
 
-    # قراءة القيم الرقمية وإصلاحها
+    # قراءة القيم الرقمية
     subtotal_in = _to_float(data.get("Subtotal"))
     total_in = _to_float(data.get("Total"))
     vat_in = _to_float(data.get("VAT"))
@@ -47,7 +47,7 @@ def build_invoice_xml(data):
 
     currency = data.get("Currency", "SAR") or "SAR"
 
-    # تعريف namespaces الخاصة بـ UBL
+    # namespaces الخاصة بـ UBL
     NSMAP = {
         "": "urn:oasis:names:specification:ubl:schema:xsd:Invoice-2",
         "cac": "urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2",
@@ -65,18 +65,18 @@ def build_invoice_xml(data):
     # الجذر: Invoice
     root = ET.Element(qname("", "Invoice"))
 
-    # رقم الفاتورة + تاريخ الإصدار
+    # ID + IssueDate
     cbc_id = ET.SubElement(root, qname("cbc", "ID"))
     cbc_id.text = str(data.get("InvoiceNumber", ""))
 
     cbc_issue_date = ET.SubElement(root, qname("cbc", "IssueDate"))
     cbc_issue_date.text = str(data.get("IssueDate", ""))
 
-    # العملة
+    # DocumentCurrencyCode
     cbc_currency = ET.SubElement(root, qname("cbc", "DocumentCurrencyCode"))
     cbc_currency.text = currency
 
-    # بيانات البائع
+    # Seller
     cac_supplier = ET.SubElement(root, qname("cac", "AccountingSupplierParty"))
     supplier_party = ET.SubElement(cac_supplier, qname("cac", "Party"))
 
@@ -87,7 +87,7 @@ def build_invoice_xml(data):
     seller_vat = ET.SubElement(supplier_tax, qname("cbc", "CompanyID"))
     seller_vat.text = str(data.get("SellerVAT", ""))
 
-    # بيانات المشتري
+    # Buyer
     cac_customer = ET.SubElement(root, qname("cac", "AccountingCustomerParty"))
     customer_party = ET.SubElement(cac_customer, qname("cac", "Party"))
 
@@ -98,13 +98,13 @@ def build_invoice_xml(data):
     buyer_vat = ET.SubElement(buyer_tax, qname("cbc", "CompanyID"))
     buyer_vat.text = str(data.get("BuyerVAT", ""))
 
-    # الضريبة الإجمالية
+    # TaxTotal
     cac_tax_total = ET.SubElement(root, qname("cac", "TaxTotal"))
     tax_amount = ET.SubElement(cac_tax_total, qname("cbc", "TaxAmount"))
     tax_amount.set("currencyID", currency)
     tax_amount.text = f"{vat:.2f}"
 
-    # المجموع النهائي
+    # LegalMonetaryTotal
     cac_legal = ET.SubElement(root, qname("cac", "LegalMonetaryTotal"))
 
     line_ext = ET.SubElement(cac_legal, qname("cbc", "LineExtensionAmount"))
