@@ -1,22 +1,26 @@
 import xml.etree.ElementTree as ET
+import uuid
 
 VAT_RATE = 0.15
 
-# يحول أي قيمة رقمية بشكل آمن
 def _to_float(value, default=0.0):
     try:
         if value is None:
             return default
         return float(value)
-    except (TypeError, ValueError):
+    except:
         return default
 
-def build_invoice_xml(data):
-    """
-    يبني فاتورة UBL 2.1 من JSON — الإصدار الأساسي (B)
-    """
 
-    # قراءة القيم الرقمية
+def build_invoice_xml(data):
+
+    # ===== 1) PROFILE ID (UBL Profile) =====
+    PROFILE_ID = "reporting:1.0"
+
+    # ===== 2) UUID =====
+    INVOICE_UUID = str(uuid.uuid4())
+
+    # ===== 3) قراءة القيم =====
     subtotal_in = _to_float(data.get("Subtotal"))
     total_in = _to_float(data.get("Total"))
     vat_in = _to_float(data.get("VAT"))
@@ -25,17 +29,14 @@ def build_invoice_xml(data):
     vat = vat_in
     total = total_in
 
-    # 1) لو فقط Subtotal
     if subtotal and not total:
         vat = round(subtotal * VAT_RATE, 2)
         total = round(subtotal + vat, 2)
 
-    # 2) لو فقط Total
     elif total and not subtotal:
         subtotal = round(total / (1 + VAT_RATE), 2)
         vat = round(total - subtotal, 2)
 
-    # 3) لو موجودين مع بعض
     elif subtotal and total:
         vat = round(subtotal * VAT_RATE, 2)
         total = round(subtotal + vat, 2)
@@ -47,7 +48,7 @@ def build_invoice_xml(data):
 
     currency = data.get("Currency", "SAR") or "SAR"
 
-    # namespaces الخاصة بـ UBL
+    # ===== 4) Namespaces =====
     NSMAP = {
         "": "urn:oasis:names:specification:ubl:schema:xsd:Invoice-2",
         "cac": "urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2",
@@ -57,69 +58,78 @@ def build_invoice_xml(data):
     for prefix, uri in NSMAP.items():
         ET.register_namespace(prefix if prefix != "" else "", uri)
 
-    def qname(prefix, tag):
+    def q(prefix, tag):
         if prefix == "":
             return f"{{{NSMAP['']}}}{tag}"
         return f"{{{NSMAP[prefix]}}}{tag}"
 
-    # الجذر: Invoice
-    root = ET.Element(qname("", "Invoice"))
+    # ===== 5) ROOT =====
+    root = ET.Element(q("", "Invoice"))
 
-    # ID + IssueDate
-    cbc_id = ET.SubElement(root, qname("cbc", "ID"))
+    # Profile ID
+    profile_id = ET.SubElement(root, q("cbc", "ProfileID"))
+    profile_id.text = PROFILE_ID
+
+    # ID
+    cbc_id = ET.SubElement(root, q("cbc", "ID"))
     cbc_id.text = str(data.get("InvoiceNumber", ""))
 
-    cbc_issue_date = ET.SubElement(root, qname("cbc", "IssueDate"))
-    cbc_issue_date.text = str(data.get("IssueDate", ""))
+    # UUID
+    cbc_uuid = ET.SubElement(root, q("cbc", "UUID"))
+    cbc_uuid.text = INVOICE_UUID
 
-    # DocumentCurrencyCode
-    cbc_currency = ET.SubElement(root, qname("cbc", "DocumentCurrencyCode"))
-    cbc_currency.text = currency
+    # IssueDate
+    issue_date = ET.SubElement(root, q("cbc", "IssueDate"))
+    issue_date.text = str(data.get("IssueDate", ""))
 
-    # Seller
-    cac_supplier = ET.SubElement(root, qname("cac", "AccountingSupplierParty"))
-    supplier_party = ET.SubElement(cac_supplier, qname("cac", "Party"))
+    # Currency
+    currency_code = ET.SubElement(root, q("cbc", "DocumentCurrencyCode"))
+    currency_code.text = currency
 
-    seller_name = ET.SubElement(supplier_party, qname("cbc", "Name"))
+    # ===== 6) SUPPLIER =====
+    supplier = ET.SubElement(root, q("cac", "AccountingSupplierParty"))
+    supplier_party = ET.SubElement(supplier, q("cac", "Party"))
+
+    seller_name = ET.SubElement(supplier_party, q("cbc", "Name"))
     seller_name.text = str(data.get("SellerName", ""))
 
-    supplier_tax = ET.SubElement(supplier_party, qname("cac", "PartyTaxScheme"))
-    seller_vat = ET.SubElement(supplier_tax, qname("cbc", "CompanyID"))
+    supplier_tax = ET.SubElement(supplier_party, q("cac", "PartyTaxScheme"))
+    seller_vat = ET.SubElement(supplier_tax, q("cbc", "CompanyID"))
     seller_vat.text = str(data.get("SellerVAT", ""))
 
-    # Buyer
-    cac_customer = ET.SubElement(root, qname("cac", "AccountingCustomerParty"))
-    customer_party = ET.SubElement(cac_customer, qname("cac", "Party"))
+    # ===== 7) CUSTOMER =====
+    customer = ET.SubElement(root, q("cac", "AccountingCustomerParty"))
+    customer_party = ET.SubElement(customer, q("cac", "Party"))
 
-    buyer_name = ET.SubElement(customer_party, qname("cbc", "Name"))
+    buyer_name = ET.SubElement(customer_party, q("cbc", "Name"))
     buyer_name.text = str(data.get("BuyerName", ""))
 
-    buyer_tax = ET.SubElement(customer_party, qname("cac", "PartyTaxScheme"))
-    buyer_vat = ET.SubElement(buyer_tax, qname("cbc", "CompanyID"))
+    buyer_tax = ET.SubElement(customer_party, q("cac", "PartyTaxScheme"))
+    buyer_vat = ET.SubElement(buyer_tax, q("cbc", "CompanyID"))
     buyer_vat.text = str(data.get("BuyerVAT", ""))
 
-    # TaxTotal
-    cac_tax_total = ET.SubElement(root, qname("cac", "TaxTotal"))
-    tax_amount = ET.SubElement(cac_tax_total, qname("cbc", "TaxAmount"))
+    # ===== 8) TAX TOTAL =====
+    tax_total = ET.SubElement(root, q("cac", "TaxTotal"))
+    tax_amount = ET.SubElement(tax_total, q("cbc", "TaxAmount"))
     tax_amount.set("currencyID", currency)
     tax_amount.text = f"{vat:.2f}"
 
-    # LegalMonetaryTotal
-    cac_legal = ET.SubElement(root, qname("cac", "LegalMonetaryTotal"))
+    # ===== 9) LEGAL MONETARY TOTAL =====
+    legal = ET.SubElement(root, q("cac", "LegalMonetaryTotal"))
 
-    line_ext = ET.SubElement(cac_legal, qname("cbc", "LineExtensionAmount"))
+    line_ext = ET.SubElement(legal, q("cbc", "LineExtensionAmount"))
     line_ext.set("currencyID", currency)
     line_ext.text = f"{subtotal:.2f}"
 
-    tax_excl = ET.SubElement(cac_legal, qname("cbc", "TaxExclusiveAmount"))
+    tax_excl = ET.SubElement(legal, q("cbc", "TaxExclusiveAmount"))
     tax_excl.set("currencyID", currency)
     tax_excl.text = f"{subtotal:.2f}"
 
-    tax_incl = ET.SubElement(cac_legal, qname("cbc", "TaxInclusiveAmount"))
+    tax_incl = ET.SubElement(legal, q("cbc", "TaxInclusiveAmount"))
     tax_incl.set("currencyID", currency)
     tax_incl.text = f"{total:.2f}"
 
-    payable = ET.SubElement(cac_legal, qname("cbc", "PayableAmount"))
+    payable = ET.SubElement(legal, q("cbc", "PayableAmount"))
     payable.set("currencyID", currency)
     payable.text = f"{total:.2f}"
 
