@@ -5,6 +5,9 @@ from validator import validate_invoice_xml
 
 app = Flask(__name__)
 
+# ---------------------------
+# Health Check
+# ---------------------------
 @app.route("/", methods=["GET"])
 def health():
     return jsonify({
@@ -12,6 +15,10 @@ def health():
         "service": "mutabiq-signing-engine"
     })
 
+
+# ---------------------------
+# 1) توقيع XML جاهز
+# ---------------------------
 @app.route("/sign", methods=["POST"])
 def sign_only():
     try:
@@ -31,27 +38,30 @@ def sign_only():
         })
 
     except Exception as e:
-        return jsonify({"status": "error", "message": str(e)}), 500
+        return jsonify({
+            "status": "error",
+            "message": str(e)
+        }), 500
 
 
+# ---------------------------
+# 2) بناء فاتورة + توقيعها
+# ---------------------------
 @app.route("/sign_invoice", methods=["POST"])
 def sign_invoice():
     try:
-        data = request.get_json(force=True)
+        data = request.get_json(force=True, silent=False)
 
-        # نبني UBL XML
-        invoice_xml = build_invoice_xml(data)
-
-        # فحص الفاتورة قبل التوقيع
-        valid, msg = validate_invoice_xml(invoice_xml)
-        if not valid:
+        if not isinstance(data, dict):
             return jsonify({
-                "status": "invalid",
-                "message": msg,
-                "invoice_xml": invoice_xml
+                "status": "error",
+                "message": "Body must be a JSON object"
             }), 400
 
-        # توقيع XML
+        # Build UBL XML
+        invoice_xml = build_invoice_xml(data)
+
+        # Sign XML
         signed = sign_xml(invoice_xml)
 
         return jsonify({
@@ -67,6 +77,36 @@ def sign_invoice():
         }), 500
 
 
+# ---------------------------
+# 3) فحص (Validation) للفاتورة
+# ---------------------------
+@app.route("/validate_invoice", methods=["POST"])
+def validate_invoice():
+    try:
+        xml_input = request.data.decode("utf-8")
+
+        if not xml_input.strip():
+            return jsonify({
+                "is_valid": False,
+                "errors": ["Empty XML body"],
+                "warnings": []
+            }), 400
+
+        result = validate_invoice_xml(xml_input)
+
+        return jsonify(result)
+
+    except Exception as e:
+        return jsonify({
+            "is_valid": False,
+            "errors": [str(e)],
+            "warnings": []
+        }), 500
+
+
+# ---------------------------
+# Run server
+# ---------------------------
 if __name__ == "__main__":
     import os
     port = int(os.environ.get("PORT", 8080))
