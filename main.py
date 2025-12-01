@@ -5,9 +5,10 @@ from validator import validate_invoice_xml
 
 app = Flask(__name__)
 
-# ------------------------------------------------------
-# 1) Health check
-# ------------------------------------------------------
+
+# -----------------------------------------
+# Health Check
+# -----------------------------------------
 @app.route("/", methods=["GET"])
 def health():
     return jsonify({
@@ -16,14 +17,16 @@ def health():
     })
 
 
-# ------------------------------------------------------
-# 2) Build + Sign Invoice
-# ------------------------------------------------------
+# -----------------------------------------
+# Build + Sign Invoice
+# -----------------------------------------
 @app.route("/sign_invoice", methods=["POST"])
 def sign_invoice():
     try:
-        data = request.get_json(force=True)
+        data = request.get_json(force=True, silent=False)
+
         invoice_xml = build_invoice_xml(data)
+
         signed = sign_xml(invoice_xml)
 
         return jsonify({
@@ -39,22 +42,16 @@ def sign_invoice():
         }), 500
 
 
-# ------------------------------------------------------
-# 3) Validate Invoice XML
-# ------------------------------------------------------
+# -----------------------------------------
+# Validate Invoice XML
+# -----------------------------------------
 @app.route("/validate_invoice", methods=["POST"])
 def validate_invoice():
     try:
-        xml_input = request.data.decode("utf-8").strip()
-
-        if not xml_input:
-            return jsonify({
-                "is_valid": False,
-                "errors": ["No XML body provided"],
-                "warnings": []
-            }), 400
+        xml_input = request.data.decode("utf-8")
 
         result = validate_invoice_xml(xml_input)
+
         return jsonify(result)
 
     except Exception as e:
@@ -65,6 +62,9 @@ def validate_invoice():
         }), 500
 
 
+# -----------------------------------------
+# Run server
+# -----------------------------------------
 if __name__ == "__main__":
     import os
     port = int(os.environ.get("PORT", 8080))
