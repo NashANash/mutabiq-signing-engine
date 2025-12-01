@@ -9,14 +9,12 @@ app = Flask(__name__)
 def health():
     return jsonify({
         "status": "ok",
-        "service": "mutabiq-signing-engine",
-        "version": "1.0-final"
+        "service": "mutabiq-signing-engine"
     })
 
-
-# ============================
-# 1) توقيع XML خام
-# ============================
+# ---------------------------
+# 1) توقيع XML مباشر
+# ---------------------------
 @app.route("/sign", methods=["POST"])
 def sign_only():
     try:
@@ -28,7 +26,6 @@ def sign_only():
             }), 400
 
         signed = sign_xml(xml_input)
-
         return jsonify({
             "status": "success",
             "signed_xml": signed
@@ -39,25 +36,20 @@ def sign_only():
             "message": str(e)
         }), 500
 
-
-# ============================
-# 2) بناء فاتورة + توقيعها
-# ============================
+# ---------------------------
+# 2) بناء + توقيع فاتورة UBL
+# ---------------------------
 @app.route("/sign_invoice", methods=["POST"])
 def sign_invoice():
     try:
-        data = request.get_json(force=True)
-
+        data = request.get_json(force=True, silent=False)
         if not isinstance(data, dict):
             return jsonify({
                 "status": "error",
                 "message": "Body must be a JSON object"
             }), 400
 
-        # نبني XML UBL كامل
         invoice_xml = build_invoice_xml(data)
-
-        # نوقّع XML
         signed = sign_xml(invoice_xml)
 
         return jsonify({
@@ -65,31 +57,26 @@ def sign_invoice():
             "invoice_xml": invoice_xml,
             "signed_xml": signed
         })
-
     except Exception as e:
         return jsonify({
             "status": "error",
             "message": str(e)
         }), 500
 
-
-
-# ================================
-# 3) فحص الفاتورة (Validation)
-# ================================
+# ---------------------------
+# 3) التحقق من الفاتورة (Validation)
+# ---------------------------
 @app.route("/validate_xml", methods=["POST"])
 def validate_xml():
     try:
         xml_input = request.data.decode("utf-8")
         if not xml_input.strip():
             return jsonify({
-                "is_valid": False,
-                "errors": ["Empty XML body"],
-                "warnings": []
+                "status": "error",
+                "message": "Empty XML body"
             }), 400
 
         result = validate_invoice_xml(xml_input)
-
         return jsonify(result)
 
     except Exception as e:
@@ -100,10 +87,7 @@ def validate_xml():
         }), 500
 
 
-
-# ================================
-# تشغيل السرفر
-# ================================
+# تشغيل السيرفر لـ Render
 if __name__ == "__main__":
     import os
     port = int(os.environ.get("PORT", 8080))
