@@ -1,6 +1,7 @@
 from flask import Flask, request, jsonify
 from signer import sign_xml
 from invoice_builder import build_invoice_xml
+from validator import validate_invoice_xml
 
 app = Flask(__name__)
 
@@ -8,15 +9,11 @@ app = Flask(__name__)
 def health():
     return jsonify({
         "status": "ok",
-        "service": "mutabiq-signing-engine",
-        "version": "1.0.0"
+        "service": "mutabiq-signing-engine"
     })
 
 @app.route("/sign", methods=["POST"])
 def sign_only():
-    """
-    يوقّع XML خام مُرسل مباشرة.
-    """
     try:
         xml_input = request.data.decode("utf-8")
 
@@ -34,30 +31,27 @@ def sign_only():
         })
 
     except Exception as e:
-        return jsonify({
-            "status": "error",
-            "message": str(e)
-        }), 500
+        return jsonify({"status": "error", "message": str(e)}), 500
 
 
 @app.route("/sign_invoice", methods=["POST"])
 def sign_invoice():
-    """
-    يبني UBL XML من JSON ثم يوقّعه.
-    """
     try:
-        data = request.get_json(force=True, silent=False)
+        data = request.get_json(force=True)
 
-        if not isinstance(data, dict):
-            return jsonify({
-                "status": "error",
-                "message": "Body must be a JSON object"
-            }), 400
-
-        # 1) بناء XML
+        # نبني UBL XML
         invoice_xml = build_invoice_xml(data)
 
-        # 2) توقيع XML النهائي
+        # فحص الفاتورة قبل التوقيع
+        valid, msg = validate_invoice_xml(invoice_xml)
+        if not valid:
+            return jsonify({
+                "status": "invalid",
+                "message": msg,
+                "invoice_xml": invoice_xml
+            }), 400
+
+        # توقيع XML
         signed = sign_xml(invoice_xml)
 
         return jsonify({
