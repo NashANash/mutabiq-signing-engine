@@ -1,112 +1,158 @@
 import xml.etree.ElementTree as ET
 
-REQUIRED_CBC = [
-    "ProfileID",
-    "ID",
-    "UUID",
-    "IssueDate",
-    "DocumentCurrencyCode",
-]
+NS = {
+    "cbc": "urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2",
+    "cac": "urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2",
+}
 
-REQUIRED_SUPPLIER = [
-    "SellerName",
-    "SellerVAT",
-]
 
-REQUIRED_BUYER = [
-    "BuyerName",
-    "BuyerVAT",
-]
-
-def _fail(msg):
-    return {"status": "error", "message": msg}
-
-def validate_invoice_xml(xml_string):
-    """
-    يتحقق من:
-    - العناصر الأساسية D-1 + D-2 + D-3
-    - البائع
-    - المشتري
-    - وجود الخطوط (Line Items)
-    - TaxTotal + LegalMonetaryTotal
-    """
-
+def _to_float(value, default=0.0):
     try:
-        root = ET.fromstring(xml_string)
-    except Exception as e:
-        return _fail(f"XML parsing error: {str(e)}")
+        if value is None:
+            return default
+        return float(value)
+    except (ValueError, TypeError):
+        return default
 
-    ns = {
-        "": "urn:oasis:names:specification:ubl:schema:xsd:Invoice-2",
-        "cac": "urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2",
-        "cbc": "urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2",
+
+def _get_text(root, path: str) -> str:
+    el = root.find(path, NS)
+    if el is not None and el.text:
+        return el.text.strip()
+    return ""
+
+
+def validate_invoice_xml(xml_str: str):
+    """
+    يفحص فاتورة UBL XML بسيطة ويرجع:
+    {
+      "is_valid": bool,
+      "errors": [..],
+      "warnings": [..]
     }
+    """
 
-    def find(path):
-        return root.find(path, ns)
+    errors = []
+    warnings = []
 
-    # -----------------------------------
-    # 1) التحقق من عناصر الـ CBC الأساسية
-    # -----------------------------------
-    for tag in REQUIRED_CBC:
-        el = find(f"cbc:{tag}")
-        if el is None or (el.text is None or el.text.strip() == ""):
-            return _fail(f"Missing or empty field: {tag}")
+    # 1) Parse XML
+    try:
+        root = ET.fromstring(xml_str)
+    except Exception as e:
+        return {
+            "is_valid": False,
+            "errors": [f"XML parse error: {str(e)}"],
+            "warnings": [],
+        }
 
-    # -----------------------------------
-    # 2) تحقق بيانات البائع D-2
-    # -----------------------------------
-    supplier_name = find("cac:AccountingSupplierParty/cac:Party/cbc:Name")
-    supplier_vat = find("cac:AccountingSupplierParty/cac:Party/cac:PartyTaxScheme/cbc:CompanyID")
+    # 2) حقول أساسية (Header)
+    profile_id = _get_text(root, ".//cbc:ProfileID")
+    invoice_id = _get_text(root, ".//cbc:ID")
+    uuid = _get_text(root, ".//cbc:UUID")
+    issue_date = _get_text(root, ".//cbc:IssueDate")
+    currency = _get_text(root, ".//cbc:DocumentCurrencyCode")
 
-    if supplier_name is None or supplier_name.text.strip() == "":
-        return _fail("Missing SellerName")
-    if supplier_vat is None or supplier_vat.text.strip() == "":
-        return _fail("Missing SellerVAT")
+    if not profile_id:
+        errors.append("Missing ProfileID.")
+    if not invoice_id:
+        errors.append("Missing Invoice ID (cbc:ID).")
+    if not uuid:
+        errors.append("Missing UUID (cbc:UUID).")
+    if not issue_date:
+        errors.append("Missing IssueDate.")
+    if not currency:
+        errors.append("Missing DocumentCurrencyCode.")
 
-    # -----------------------------------
-    # 3) تحقق بيانات المشتري D-3
-    # -----------------------------------
-    buyer_name = find("cac:AccountingCustomerParty/cac:Party/cbc:Name")
-    buyer_vat = find("cac:AccountingCustomerParty/cac:Party/cac:PartyTaxScheme/cbc:CompanyID")
+    # 3) بيانات البائع والمشتري
+    seller_name = _get_text(
+        root, ".//cac:AccountingSupplierParty/cac:Party/cbc:Name"
+    )
+    seller_vat = _get_text(
+        root,
+        ".//cac:AccountingSupplierParty/cac:Party/cac:PartyTaxScheme/cbc:CompanyID",
+    )
 
-    if buyer_name is None or buyer_name.text.strip() == "":
-        return _fail("Missing BuyerName")
-    if buyer_vat is None or buyer_vat.text.strip() == "":
-        return _fail("Missing BuyerVAT")
+    buyer_name = _get_text(
+        root, ".//cac:AccountingCustomerParty/cac:Party/cbc:Name"
+    )
+    buyer_vat = _get_text(
+        root,
+        ".//cac:AccountingCustomerParty/cac:Party/cac:PartyTaxScheme/cbc:CompanyID",
+    )
 
-    # -----------------------------------
-    # 4) تحقق من Line Items
-    # -----------------------------------
-    lines = root.findall("cac:InvoiceLine", ns)
-    if len(lines) == 0:
-        return _fail("Invoice must contain at least one InvoiceLine")
+    if not seller_name:
+        errors.append("Missing seller name.")
+    if not seller_vat:
+        errors.append("Missing seller VAT (CompanyID).")
+    if not buyer_name:
+        errors.append("Missing buyer name.")
+    if not buyer_vat:
+        errors.append("Missing buyer VAT (CompanyID).")
 
-    # تحقق داخل كل Line
-    for idx, line in enumerate(lines, start=1):
-        id_el = line.find("cbc:ID", ns)
-        amount = line.find("cbc:LineExtensionAmount", ns)
-        item = line.find("cac:Item/cbc:Name", ns)
+    # 4) المجاميع في الـ Header
+    tax_total_header = _get_text(root, ".//cac:TaxTotal/cbc:TaxAmount")
+    line_ext_header = _get_text(
+        root, ".//cac:LegalMonetaryTotal/cbc:LineExtensionAmount"
+    )
+    tax_inclusive_header = _get_text(
+        root, ".//cac:LegalMonetaryTotal/cbc:TaxInclusiveAmount"
+    )
 
-        if id_el is None:
-            return _fail(f"Line {idx}: Missing ID")
-        if amount is None:
-            return _fail(f"Line {idx}: Missing LineExtensionAmount")
-        if item is None:
-            return _fail(f"Line {idx}: Missing Item Name")
+    tax_total_header_val = _to_float(tax_total_header, 0.0)
+    line_ext_header_val = _to_float(line_ext_header, 0.0)
+    tax_inclusive_header_val = _to_float(tax_inclusive_header, 0.0)
 
-    # -----------------------------------
-    # 5) تحقق من وجود TaxTotal + LegalMonetaryTotal
-    # -----------------------------------
-    tax_total = find("cac:TaxTotal/cbc:TaxAmount")
-    legal_total = find("cac:LegalMonetaryTotal/cbc:PayableAmount")
+    # 5) حساب المجاميع من الـ Line Items
+    lines = root.findall(".//cac:InvoiceLine", NS)
+    sum_lines_subtotal = 0.0
+    sum_lines_vat = 0.0
 
-    if tax_total is None:
-        return _fail("Missing TaxTotal")
-    if legal_total is None:
-        return _fail("Missing LegalMonetaryTotal → PayableAmount")
+    for line in lines:
+        line_ext = _get_text(line, "./cbc:LineExtensionAmount")
+        line_ext_val = _to_float(line_ext, 0.0)
+        sum_lines_subtotal += line_ext_val
 
-    # -----------------------------------
-    # إذا مرّ كل شيء:
-    # -----------------------------------
-    return {"status": "success", "message": "Invoice XML is valid and compliant"}
+        # VAT per line (TaxTotal/TaxSubtotal/TaxAmount)
+        line_tax_amount = _get_text(
+            line, "./cac:TaxTotal/cac:TaxSubtotal/cbc:TaxAmount"
+        )
+        sum_lines_vat += _to_float(line_tax_amount, 0.0)
+
+    # 6) مقارنة المجاميع (نسمح بفارق صغير 0.01)
+    EPS = 0.01
+
+    if lines:
+        if abs(sum_lines_subtotal - line_ext_header_val) > EPS:
+            errors.append(
+                f"LineExtensionAmount total ({line_ext_header_val}) "
+                f"does not match sum of lines ({sum_lines_subtotal})."
+            )
+
+        if abs(sum_lines_vat - tax_total_header_val) > EPS:
+            errors.append(
+                f"TaxTotal ({tax_total_header_val}) "
+                f"does not match sum of line VAT ({sum_lines_vat})."
+            )
+
+        expected_tax_inclusive = round(
+            sum_lines_subtotal + sum_lines_vat, 2
+        )
+        if abs(expected_tax_inclusive - tax_inclusive_header_val) > EPS:
+            errors.append(
+                f"TaxInclusiveAmount ({tax_inclusive_header_val}) "
+                f"does not equal subtotal+VAT ({expected_tax_inclusive})."
+            )
+
+    # 7) QR / TLV موجود؟
+    qr_node = root.find(".//cbc:EmbeddedDocumentBinaryObject", NS)
+    if qr_node is None or not (qr_node.text or "").strip():
+        warnings.append("QR (EmbeddedDocumentBinaryObject) is missing or empty.")
+
+    # 8) النتيجة النهائية
+    is_valid = len(errors) == 0
+
+    return {
+        "is_valid": is_valid,
+        "errors": errors,
+        "warnings": warnings,
+    }
