@@ -24,7 +24,7 @@ def _get_text(root, path: str) -> str:
 
 def validate_invoice_xml(xml_str: str):
     """
-    يفحص فاتورة UBL XML بسيطة ويرجع:
+    يفحص فاتورة UBL XML ويرجع:
     {
       "is_valid": bool,
       "errors": [..],
@@ -45,7 +45,7 @@ def validate_invoice_xml(xml_str: str):
             "warnings": [],
         }
 
-    # 2) حقول أساسية (Header)
+    # 2) Header Fields
     profile_id = _get_text(root, ".//cbc:ProfileID")
     invoice_id = _get_text(root, ".//cbc:ID")
     uuid = _get_text(root, ".//cbc:UUID")
@@ -63,18 +63,14 @@ def validate_invoice_xml(xml_str: str):
     if not currency:
         errors.append("Missing DocumentCurrencyCode.")
 
-    # 3) بيانات البائع والمشتري
-    seller_name = _get_text(
-        root, ".//cac:AccountingSupplierParty/cac:Party/cbc:Name"
-    )
+    # 3) Seller & Buyer Mandatory Fields
+    seller_name = _get_text(root, ".//cac:AccountingSupplierParty/cac:Party/cbc:Name")
     seller_vat = _get_text(
         root,
         ".//cac:AccountingSupplierParty/cac:Party/cac:PartyTaxScheme/cbc:CompanyID",
     )
 
-    buyer_name = _get_text(
-        root, ".//cac:AccountingCustomerParty/cac:Party/cbc:Name"
-    )
+    buyer_name = _get_text(root, ".//cac:AccountingCustomerParty/cac:Party/cbc:Name")
     buyer_vat = _get_text(
         root,
         ".//cac:AccountingCustomerParty/cac:Party/cac:PartyTaxScheme/cbc:CompanyID",
@@ -89,36 +85,29 @@ def validate_invoice_xml(xml_str: str):
     if not buyer_vat:
         errors.append("Missing buyer VAT (CompanyID).")
 
-    # 4) المجاميع في الـ Header
+    # 4) Header Totals
     tax_total_header = _get_text(root, ".//cac:TaxTotal/cbc:TaxAmount")
-    line_ext_header = _get_text(
-        root, ".//cac:LegalMonetaryTotal/cbc:LineExtensionAmount"
-    )
-    tax_inclusive_header = _get_text(
-        root, ".//cac:LegalMonetaryTotal/cbc:TaxInclusiveAmount"
-    )
+    line_ext_header = _get_text(root, ".//cac:LegalMonetaryTotal/cbc:LineExtensionAmount")
+    tax_inclusive_header = _get_text(root, ".//cac:LegalMonetaryTotal/cbc:TaxInclusiveAmount")
 
     tax_total_header_val = _to_float(tax_total_header, 0.0)
     line_ext_header_val = _to_float(line_ext_header, 0.0)
     tax_inclusive_header_val = _to_float(tax_inclusive_header, 0.0)
 
-    # 5) حساب المجاميع من الـ Line Items
+    # 5) Recompute totals from Line Items
     lines = root.findall(".//cac:InvoiceLine", NS)
     sum_lines_subtotal = 0.0
     sum_lines_vat = 0.0
 
     for line in lines:
         line_ext = _get_text(line, "./cbc:LineExtensionAmount")
-        line_ext_val = _to_float(line_ext, 0.0)
-        sum_lines_subtotal += line_ext_val
+        sum_lines_subtotal += _to_float(line_ext, 0.0)
 
-        # VAT per line (TaxTotal/TaxSubtotal/TaxAmount)
         line_tax_amount = _get_text(
             line, "./cac:TaxTotal/cac:TaxSubtotal/cbc:TaxAmount"
         )
         sum_lines_vat += _to_float(line_tax_amount, 0.0)
 
-    # 6) مقارنة المجاميع (نسمح بفارق صغير 0.01)
     EPS = 0.01
 
     if lines:
@@ -134,25 +123,21 @@ def validate_invoice_xml(xml_str: str):
                 f"does not match sum of line VAT ({sum_lines_vat})."
             )
 
-        expected_tax_inclusive = round(
-            sum_lines_subtotal + sum_lines_vat, 2
-        )
+        expected_tax_inclusive = round(sum_lines_subtotal + sum_lines_vat, 2)
         if abs(expected_tax_inclusive - tax_inclusive_header_val) > EPS:
             errors.append(
                 f"TaxInclusiveAmount ({tax_inclusive_header_val}) "
                 f"does not equal subtotal+VAT ({expected_tax_inclusive})."
             )
 
-    # 7) QR / TLV موجود؟
+    # 7) QR / TLV
     qr_node = root.find(".//cbc:EmbeddedDocumentBinaryObject", NS)
     if qr_node is None or not (qr_node.text or "").strip():
         warnings.append("QR (EmbeddedDocumentBinaryObject) is missing or empty.")
 
-    # 8) النتيجة النهائية
-    is_valid = len(errors) == 0
-
+    # 8) Final result
     return {
-        "is_valid": is_valid,
+        "is_valid": len(errors) == 0,
         "errors": errors,
         "warnings": warnings,
     }
