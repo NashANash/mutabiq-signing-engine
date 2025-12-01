@@ -5,25 +5,22 @@ from validator import validate_invoice_xml
 
 app = Flask(__name__)
 
-# ---------------------------
-# Health Check
-# ---------------------------
 @app.route("/", methods=["GET"])
 def health():
     return jsonify({
         "status": "ok",
-        "service": "mutabiq-signing-engine"
+        "service": "mutabiq-signing-engine",
+        "version": "1.0-final"
     })
 
 
-# ---------------------------
-# 1) توقيع XML جاهز
-# ---------------------------
+# ============================
+# 1) توقيع XML خام
+# ============================
 @app.route("/sign", methods=["POST"])
 def sign_only():
     try:
         xml_input = request.data.decode("utf-8")
-
         if not xml_input.strip():
             return jsonify({
                 "status": "error",
@@ -36,7 +33,6 @@ def sign_only():
             "status": "success",
             "signed_xml": signed
         })
-
     except Exception as e:
         return jsonify({
             "status": "error",
@@ -44,13 +40,13 @@ def sign_only():
         }), 500
 
 
-# ---------------------------
+# ============================
 # 2) بناء فاتورة + توقيعها
-# ---------------------------
+# ============================
 @app.route("/sign_invoice", methods=["POST"])
 def sign_invoice():
     try:
-        data = request.get_json(force=True, silent=False)
+        data = request.get_json(force=True)
 
         if not isinstance(data, dict):
             return jsonify({
@@ -58,10 +54,10 @@ def sign_invoice():
                 "message": "Body must be a JSON object"
             }), 400
 
-        # Build UBL XML
+        # نبني XML UBL كامل
         invoice_xml = build_invoice_xml(data)
 
-        # Sign XML
+        # نوقّع XML
         signed = sign_xml(invoice_xml)
 
         return jsonify({
@@ -77,14 +73,14 @@ def sign_invoice():
         }), 500
 
 
-# ---------------------------
-# 3) فحص (Validation) للفاتورة
-# ---------------------------
-@app.route("/validate_invoice", methods=["POST"])
-def validate_invoice():
+
+# ================================
+# 3) فحص الفاتورة (Validation)
+# ================================
+@app.route("/validate_xml", methods=["POST"])
+def validate_xml():
     try:
         xml_input = request.data.decode("utf-8")
-
         if not xml_input.strip():
             return jsonify({
                 "is_valid": False,
@@ -104,9 +100,10 @@ def validate_invoice():
         }), 500
 
 
-# ---------------------------
-# Run server
-# ---------------------------
+
+# ================================
+# تشغيل السرفر
+# ================================
 if __name__ == "__main__":
     import os
     port = int(os.environ.get("PORT", 8080))
