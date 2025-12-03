@@ -3,3 +3,4 @@ signxml
 lxml
 cryptography
 gunicorn
+fpdf2
