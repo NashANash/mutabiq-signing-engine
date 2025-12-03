@@ -2,6 +2,7 @@ from flask import Flask, request, jsonify
 from signer import sign_xml
 from invoice_builder import build_invoice_xml
 from validator import validate_invoice_xml
+from pdf_generator import generate_pdf_from_xml
 
 app = Flask(__name__)
 
@@ -47,9 +48,7 @@ def sign_invoice():
 def validate_invoice():
     try:
         xml_input = request.data.decode("utf-8")
-
         result = validate_invoice_xml(xml_input)
-
         return jsonify(result)
 
     except Exception as e:
@@ -61,7 +60,7 @@ def validate_invoice():
 
 
 # -------------------------------
-# 3) OpenAPI spec
+# 3) OpenAPI Spec
 # -------------------------------
 @app.route("/openapi.json", methods=["GET"])
 def openapi():
@@ -96,6 +95,27 @@ def docs():
     </html>
     """
     return html
+
+
+# -------------------------------
+# 5) Generate PDF
+# -------------------------------
+@app.route("/generate_pdf", methods=["POST"])
+def generate_pdf():
+    try:
+        xml_input = request.data.decode("utf-8")
+        filename = generate_pdf_from_xml(xml_input)
+
+        return jsonify({
+            "status": "success",
+            "pdf_file": filename
+        })
+
+    except Exception as e:
+        return jsonify({
+            "status": "error",
+            "message": str(e)
+        }), 500
 
 
 # -------------------------------
