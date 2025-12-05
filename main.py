@@ -3,12 +3,31 @@ from signer import sign_xml
 from invoice_builder import build_invoice_xml
 from validator import validate_invoice_xml
 from pdf_generator import generate_pdf_from_xml
+import os
 
 app = Flask(__name__)
 
-# -------------------------------
-# 0) Health Check
-# -------------------------------
+# ===============================
+# API KEY CONFIG
+# ===============================
+VALID_API_KEYS = {
+    "test-key-123",
+    "client-key-456"
+}
+
+def require_api_key():
+    api_key = request.headers.get("X-API-Key")
+    if api_key not in VALID_API_KEYS:
+        return jsonify({
+            "status": "error",
+            "message": "Invalid or missing API Key"
+        }), 401
+    return None
+
+
+# ===============================
+# 0) Health Check (بدون API)
+# ===============================
 @app.route("/", methods=["GET"])
 def health():
     return jsonify({
@@ -17,14 +36,17 @@ def health():
     })
 
 
-# -------------------------------
+# ===============================
 # 1) Build + Sign Invoice
-# -------------------------------
+# ===============================
 @app.route("/sign_invoice", methods=["POST"])
 def sign_invoice():
+    auth_error = require_api_key()
+    if auth_error:
+        return auth_error
+
     try:
         data = request.get_json(force=True)
-
         invoice_xml = build_invoice_xml(data)
         signed = sign_xml(invoice_xml)
 
@@ -41,11 +63,15 @@ def sign_invoice():
         }), 500
 
 
-# -------------------------------
-# 2) Validate XML Invoice
-# -------------------------------
+# ===============================
+# 2) Validate XML
+# ===============================
 @app.route("/validate_invoice", methods=["POST"])
 def validate_invoice():
+    auth_error = require_api_key()
+    if auth_error:
+        return auth_error
+
     try:
         xml_input = request.data.decode("utf-8")
         result = validate_invoice_xml(xml_input)
@@ -59,18 +85,18 @@ def validate_invoice():
         }), 500
 
 
-# -------------------------------
+# ===============================
 # 3) OpenAPI Spec
-# -------------------------------
+# ===============================
 @app.route("/openapi.json", methods=["GET"])
 def openapi():
     with open("openapi.json", "r") as f:
         return f.read(), 200, {"Content-Type": "application/json"}
 
 
-# -------------------------------
+# ===============================
 # 4) Swagger Docs
-# -------------------------------
+# ===============================
 @app.route("/docs", methods=["GET"])
 def docs():
     html = """
@@ -97,11 +123,15 @@ def docs():
     return html
 
 
-# -------------------------------
+# ===============================
 # 5) Generate PDF
-# -------------------------------
+# ===============================
 @app.route("/generate_pdf", methods=["POST"])
 def generate_pdf():
+    auth_error = require_api_key()
+    if auth_error:
+        return auth_error
+
     try:
         xml_input = request.data.decode("utf-8")
         filename = generate_pdf_from_xml(xml_input)
@@ -118,10 +148,9 @@ def generate_pdf():
         }), 500
 
 
-# -------------------------------
+# ===============================
 # Run
-# -------------------------------
+# ===============================
 if __name__ == "__main__":
-    import os
     port = int(os.environ.get("PORT", 8080))
     app.run(host="0.0.0.0", port=port)
